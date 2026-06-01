@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Verhuizing">
+<meta name="application-name" content="Verhuizing">
+<meta name="theme-color" content="#1a1a18">
+<link rel="apple-touch-icon" sizes="180x180" href="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
@@ -343,7 +351,13 @@ let collapsed={}, editingTaskId=null, editingBoxId=null, activeTab='taken', save
 
 // ── AUDIO ──
 let audioCtx=null;
-function getAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function getAudio(){
+  try{
+    if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended')audioCtx.resume();
+    return audioCtx;
+  }catch(e){return null;}
+}
 
 function noot(ctx,freq,start,dur,vol=0.15,type='sawtooth'){
   const osc=ctx.createOscillator(),gain=ctx.createGain();
@@ -358,14 +372,14 @@ function noot(ctx,freq,start,dur,vol=0.15,type='sawtooth'){
 
 function speelTrompet(){
   try{
-    const c=getAudio();
+    const c=getAudio();if(!c)return;
     noot(c,523.25,0,.15);noot(c,659.25,.15,.15);noot(c,783.99,.3,.15);noot(c,1046.5,.45,.3);
   }catch(e){}
 }
 
 function speelKamerSolo(){
   try{
-    const c=getAudio();
+    const c=getAudio();if(!c)return;
     // Uitgebreide fanfare solo ~4 seconden
     const melodie=[
       // Opkomst
@@ -514,20 +528,29 @@ function showToast(msg,type=''){
 // ── SUPABASE CONFIG ──
 const SUPABASE_URL='https://ctugrtcclwsdsriafxbt.supabase.co';
 const SUPABASE_KEY='sb_publishable_h8-NnMFZLLxgbM0vg43oXQ_jx5TVy5y';
+const SB_HEADERS={
+  'apikey':SUPABASE_KEY,
+  'Authorization':'Bearer '+SUPABASE_KEY,
+  'Accept':'application/json',
+  'Content-Type':'application/json'
+};
 async function sbGet(table){
-  const r=await fetch(SUPABASE_URL+'/rest/v1/'+table+'?select=*',{
-    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}
-  });
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  return r.json();
+  const controller=new AbortController();
+  const tid=setTimeout(()=>controller.abort(),12000);
+  try{
+    const r=await fetch(SUPABASE_URL+'/rest/v1/'+table+'?select=*',{
+      method:'GET',headers:SB_HEADERS,signal:controller.signal
+    });
+    clearTimeout(tid);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }catch(e){clearTimeout(tid);if(e.name==='AbortError')throw new Error('Timeout (12s) – geen verbinding');throw e;}
 }
 async function sbUpsert(table,rows){
   if(!rows.length)return;
   const r=await fetch(SUPABASE_URL+'/rest/v1/'+table,{
     method:'POST',
-    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,
-      'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'
-    },
+    headers:{...SB_HEADERS,'Prefer':'resolution=merge-duplicates'},
     body:JSON.stringify(rows)
   });
   if(!r.ok){const t=await r.text();throw new Error(t);}
@@ -536,7 +559,7 @@ async function sbDelete(table,ids){
   if(!ids.length)return;
   const r=await fetch(SUPABASE_URL+'/rest/v1/'+table+'?id=in.('+ids.map(i=>'"'+i+'"').join(',')+')',{
     method:'DELETE',
-    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}
+    headers:SB_HEADERS
   });
   if(!r.ok){const t=await r.text();throw new Error(t);}
 }
@@ -549,7 +572,10 @@ async function laadData(feedback=false){
     verwerkData({taken:t,dozen:d,planning:p},feedback);
   }catch(err){
     setStatus('err','Laden mislukt');
-    document.getElementById('kamer-lijst').innerHTML=`<div class="error-state"><span>Kan Supabase niet bereiken: ${err.message}</span><button class="btn sm" onclick="laadData(true)">Opnieuw</button></div>`;
+    const hint=err.message.includes('Timeout')?'Geen internet of Supabase onbereikbaar.':
+               err.message.includes('Failed to fetch')||err.message.includes('NetworkError')?'Netwerk-fout – controleer je verbinding.':
+               err.message;
+    document.getElementById('kamer-lijst').innerHTML=`<div class="error-state"><span>⚠️ ${hint}</span><br><small style="color:var(--red);opacity:.7">${err.message}</small><br><br><button class="btn sm" onclick="laadData(true)">Opnieuw proberen</button></div>`;
     if(feedback)showToast('Laden mislukt','err');
   }
 }

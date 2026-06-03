@@ -808,9 +808,48 @@ function saveBox(){const naam=document.getElementById('bm-naam').value.trim();if
 const DAGNAMEN=['Ma','Di','Wo','Do','Vr','Za','Zo'];
 const MAANDNAMEN=['Januari','Februari','Maart','April','Mei','Juni','Juli','Augustus','September','Oktober','November','December'];
 let calView='maand', calDate=new Date();
+let gcalEventsCache={}, gcalCalendars=[], _fetchingGcal=false;
+function gcalEventsOpDatum(str){return gcalEventsCache[str]||[];}
 
 function calStr(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function itemsOpDatum(str){return planning.filter(p=>p.datum===str);}
+
+function _calPeriodBounds(){
+  if(calView==='dag')return{start:calStr(calDate),end:calStr(calDate)};
+  if(calView==='week'){
+    const ma=new Date(calDate);ma.setDate(ma.getDate()-((ma.getDay()+6)%7));
+    const zo=new Date(ma);zo.setDate(zo.getDate()+6);
+    return{start:calStr(ma),end:calStr(zo)};
+  }
+  const y=calDate.getFullYear(),m=calDate.getMonth();
+  return{start:y+'-'+String(m+1).padStart(2,'0')+'-01',end:y+'-'+String(m+1).padStart(2,'0')+'-'+String(new Date(y,m+1,0).getDate()).padStart(2,'0')};
+}
+
+async function fetchGcalEvents(){
+  if(!gcalReady||_fetchingGcal)return;
+  _fetchingGcal=true;
+  if(!gcalCalendars.length){
+    try{const d=await gcalFetch('GET','/users/me/calendarList');gcalCalendars=d.items||[];}
+    catch(e){_fetchingGcal=false;return;}
+  }
+  const{start,end}=_calPeriodBounds();
+  const params=`timeMin=${encodeURIComponent(start+'T00:00:00Z')}&timeMax=${encodeURIComponent(end+'T23:59:59Z')}&singleEvents=true&maxResults=500`;
+  let cur=new Date(start+'T00:00:00');const endD=new Date(end+'T00:00:00');
+  while(cur<=endD){delete gcalEventsCache[calStr(cur)];cur.setDate(cur.getDate()+1);}
+  for(const cal of gcalCalendars){
+    try{
+      const data=await gcalFetch('GET',`/calendars/${encodeURIComponent(cal.id)}/events?${params}`);
+      for(const ev of(data.items||[])){
+        const ds=((ev.start.date||(ev.start.dateTime||'').slice(0,10))||'').slice(0,10);
+        if(!ds)continue;
+        if(!gcalEventsCache[ds])gcalEventsCache[ds]=[];
+        gcalEventsCache[ds].push({id:ev.id,summary:ev.summary||'(geen titel)',color:cal.backgroundColor||'#4285f4',calNaam:cal.summary});
+      }
+    }catch(e){}
+  }
+  _fetchingGcal=false;
+  _renderPlanningNow();
+}
 
 function switchCalView(v){
   calView=v;
@@ -834,6 +873,11 @@ function calDagClick(str){
 }
 
 function renderPlanning(){
+  _renderPlanningNow();
+  if(gcalReady)fetchGcalEvents();
+}
+
+function _renderPlanningNow(){
   const container=document.getElementById('cal-container');
   if(!container)return;
   const lbl=document.getElementById('cal-period-label');
@@ -868,11 +912,16 @@ function _renderMaand(){
   for(let dag=1;dag<=dagenInMaand;dag++){
     const str=year+'-'+String(month+1).padStart(2,'0')+'-'+String(dag).padStart(2,'0');
     const items=itemsOpDatum(str);
+    const gevs=gcalEventsOpDatum(str);
     const isVandaag=str===vandaag;
+    const sShow=items.slice(0,2);
+    const gShow=gevs.slice(0,Math.max(0,3-sShow.length));
+    const meer=items.length+gevs.length-sShow.length-gShow.length;
     html+=`<div class="cal-day${isVandaag?' vandaag':''}" onclick="calDagClick('${str}')">
       <div class="cal-day-num">${dag}</div>
-      ${items.slice(0,2).map(p=>`<div class="cal-chip" title="${p.naam}">${p.naam}</div>`).join('')}
-      ${items.length>2?`<div class="cal-meer">+${items.length-2}</div>`:''}
+      ${sShow.map(p=>`<div class="cal-chip" title="${p.naam}">${p.naam}</div>`).join('')}
+      ${gShow.map(ev=>`<div class="cal-chip" style="background:${ev.color}22;color:${ev.color};border:0.5px solid ${ev.color}55" title="${ev.calNaam}: ${ev.summary}">${ev.summary}</div>`).join('')}
+      ${meer>0?`<div class="cal-meer">+${meer}</div>`:''}
     </div>`;
   }
   const rest=(7-(startDag+dagenInMaand)%7)%7;
@@ -887,12 +936,14 @@ function _renderWeek(maandag){
     const d=new Date(maandag);d.setDate(d.getDate()+i);
     const str=calStr(d);
     const items=itemsOpDatum(str);
+    const gevs=gcalEventsOpDatum(str);
     const isVandaag=str===vandaag;
     html+=`<div class="cal-week-col${isVandaag?' vandaag':''}" onclick="calDagClick('${str}')" style="cursor:pointer">
       <div class="cal-week-dag-lbl">${DAGNAMEN[i]}</div>
       <div class="cal-week-datum">${d.getDate()}</div>
       ${items.map(p=>`<div class="cal-chip" style="margin-bottom:3px" title="${p.naam}">${p.naam}</div>`).join('')}
-      ${!items.length?`<div class="cal-week-leeg">—</div>`:''}
+      ${gevs.map(ev=>`<div class="cal-chip" style="margin-bottom:3px;background:${ev.color}22;color:${ev.color};border:0.5px solid ${ev.color}55" title="${ev.calNaam}: ${ev.summary}">${ev.summary}</div>`).join('')}
+      ${!items.length&&!gevs.length?`<div class="cal-week-leeg">—</div>`:''}
     </div>`;
   }
   return html+'</div>';
@@ -901,14 +952,16 @@ function _renderWeek(maandag){
 function _renderDag(){
   const str=calStr(calDate);
   const items=itemsOpDatum(str);
+  const gevs=gcalEventsOpDatum(str);
+  const supaHtml=items.map(p=>{
+    const synced=gcalGetId(p.id);
+    const gcalBtn=gcalReady?`<button class="btn sm icon gcal-icon ${synced?'gesync':''}" style="float:right;margin-top:-2px" title="${synced?'Bijwerken':'Toevoegen aan Agenda'}" onclick="syncPlan('${p.id}')"><i class="ti ${synced?'ti-calendar-check':'ti-calendar-plus'}" aria-hidden="true"></i></button>`:'';
+    return`<div class="cal-dag-item">${gcalBtn}<div class="naam">${p.naam}</div><div class="meta">${p.cat}${p.note?' · '+p.note:''}</div><button class="btn sm danger" style="margin-top:8px" onclick="deletePlan('${p.id}')"><i class="ti ti-trash"></i> Verwijder</button></div>`;
+  }).join('');
+  const gcalHtml=gevs.map(ev=>`<div class="cal-dag-item" style="background:${ev.color}15;border-left-color:${ev.color}"><div class="naam">${ev.summary}</div><div class="meta">${ev.calNaam}</div></div>`).join('');
   return`<div class="cal-dag-view">
-    ${items.length
-      ?items.map(p=>{
-        const synced=gcalGetId(p.id);
-        const gcalBtn=gcalReady?`<button class="btn sm icon gcal-icon ${synced?'gesync':''}" style="float:right;margin-top:-2px" title="${synced?'Bijwerken':'Toevoegen aan Agenda'}" onclick="syncPlan('${p.id}')"><i class="ti ${synced?'ti-calendar-check':'ti-calendar-plus'}" aria-hidden="true"></i></button>`:'';
-        return`<div class="cal-dag-item">${gcalBtn}<div class="naam">${p.naam}</div><div class="meta">${p.cat}${p.note?' · '+p.note:''}</div><button class="btn sm danger" style="margin-top:8px" onclick="deletePlan('${p.id}')"><i class="ti ti-trash"></i> Verwijder</button></div>`;
-      }).join('')
-      :'<div style="color:var(--text2);font-size:14px;padding:0.5rem 0">Geen afspraken op deze dag.</div>'}
+    ${supaHtml}${gcalHtml}
+    ${!items.length&&!gevs.length?'<div style="color:var(--text2);font-size:14px;padding:0.5rem 0">Geen afspraken op deze dag.</div>':''}
   </div>`;
 }
 
@@ -981,8 +1034,10 @@ function initGcal(){
     callback(resp){
       if(resp.error){showToast('Google Agenda: '+resp.error,'err');return;}
       gcalToken=resp.access_token;gcalReady=true;
+      gcalCalendars=[];gcalEventsCache={};
       updateGcalUI();
       showToast('✓ Google Agenda gekoppeld','ok');
+      if(activeTab==='planning')fetchGcalEvents();
     }
   });
 }

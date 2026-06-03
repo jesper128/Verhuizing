@@ -233,8 +233,6 @@
   .gcal-verbonden:hover{background:#d4edda!important;}
   .plan-item .gcal-icon{color:var(--text3);}
   .plan-item .gcal-icon.gesync{color:var(--green-mid);}
-  #gcal-setup-banner{background:var(--amber-bg);border:0.5px solid rgba(133,79,11,.2);border-radius:var(--radius);padding:12px 14px;font-size:12px;color:var(--amber);margin-bottom:1rem;display:flex;align-items:center;gap:8px;line-height:1.5;}
-  #gcal-setup-banner a{color:var(--amber);font-weight:600;}
 
   /* ── KALENDER ── */
   .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px;}
@@ -348,10 +346,6 @@
         <button data-view="maand" onclick="switchCalView('maand')" class="active">Maand</button>
         <button data-view="lijst" onclick="switchCalView('lijst')">Lijst</button>
       </div>
-    </div>
-    <div id="gcal-setup-banner" style="display:none">
-      <i class="ti ti-info-circle" style="font-size:16px;flex-shrink:0"></i>
-      <span>Stel je <strong>Google Client ID</strong> in: open dit bestand, zoek op <code>GCAL_CLIENT_ID</code> en vervang de placeholder. Zie de <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a>. Let op: het bestand moet via <strong>http://localhost</strong> worden geserveerd (niet via file://).</span>
     </div>
     <div id="cal-container"><div class="loading"><div class="spinner"></div>Laden...</div></div>
   </div>
@@ -981,10 +975,6 @@ function gcalClearId(planId){delete _gcalMap[planId];_gcalSave();}
 
 function initGcal(){
   if(typeof google==='undefined'||!google.accounts){setTimeout(initGcal,500);return;}
-  if(GCAL_CLIENT_ID.startsWith('JOUW')){
-    document.getElementById('gcal-setup-banner').style.display='flex';
-    return;
-  }
   gcalTokenClient=google.accounts.oauth2.initTokenClient({
     client_id:GCAL_CLIENT_ID,
     scope:GCAL_SCOPE,
@@ -998,7 +988,6 @@ function initGcal(){
 }
 
 function verbindGcal(){
-  if(GCAL_CLIENT_ID.startsWith('JOUW')){showToast('Stel eerst je Google Client ID in (zie de gele balk)','err');return;}
   if(!gcalTokenClient){showToast('Google API nog niet geladen – probeer opnieuw','err');return;}
   if(gcalReady)return;
   gcalTokenClient.requestAccessToken({prompt:''});

@@ -969,8 +969,8 @@ document.addEventListener('touchend',async()=>{if(ptrReady)await laadData(true);
 // !! Vervang de waarde hieronder met jouw eigen OAuth2 Client ID uit Google Cloud Console !!
 // Stappen: console.cloud.google.com → APIs & Services → Credentials → Create Credentials → OAuth Client ID
 // Type: Webtoepassing → Authorized JavaScript origins: https://jouwgebruikersnaam.github.io
-const GCAL_CLIENT_ID = 'JOUW_CLIENT_ID.apps.googleusercontent.com';
-const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const GCAL_CLIENT_ID = '347871529465-6v7ueuejnuv6jggaofdj2s31mpofvc4b.apps.googleusercontent.com';
+const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar';
 
 let gcalToken=null, gcalTokenClient=null, gcalReady=false;
 const _gcalMap=JSON.parse(localStorage.getItem('verhuizing_gcal_ids')||'{}');
